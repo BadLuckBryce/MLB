@@ -5,6 +5,8 @@ import numpy as np
 import pandas as pd
 import requests
 from bs4 import BeautifulSoup
+from datetime import date
+
 
 def pullIndex(team, teamList, nTeams):
 
@@ -138,6 +140,8 @@ def pageRank(M, damping, postSeason):
 def completeTeam(team, teamsList):
     if team == "Diamondbacks":
         team = "D'Backs"
+    elif team == "Red":
+        team = "Red Sox"
 
     for current in teamsList:
         if team.strip() in current:
@@ -244,11 +248,15 @@ def findGames():
     numOutcomes = len(outcome_sections)
 
     remainders = numOutcomes % numTeamsPlaying
+    activeTeams = int((numTeamsPlaying*6 - numOutcomes)/2)
+    floatingOutcomes = int((numTeamsPlaying*6 - numOutcomes))
+
     if remainders == 0:
         start = 0
     else:
         start = int(remainders/2 - 1)
 
+    numTeamsPlaying = int(len(team_sections) - activeTeams)
 
     oddsList = []
     for i in range(int(numTeamsPlaying/2)):
@@ -256,16 +264,16 @@ def findGames():
 
     for i in range(numTeamsPlaying):
         if i % 2 == 0:
-            oddsList[int(i/2)][0] = team_sections[i].contents[0].split(" ")[1]
+            oddsList[int((i)/2)][0] = team_sections[i+activeTeams].contents[0].split(" ")[1]
         else:
-            oddsList[int((i - 1)/2)][1] = team_sections[i].contents[0].split(" ")[1]
+            oddsList[int((i - 1)/2)][1] = team_sections[i+activeTeams].contents[0].split(" ")[1]
 
-    for i in range(start, numTeamsPlaying):
-        j = 2*int(3*i+2 - remainders)+1
+    for i in range(numTeamsPlaying):
+        j = int(6*i+6) + floatingOutcomes+1
         if i % 2 == 0:
-            oddsList[int(i/2)][2] = float(outcome_sections[j].contents[0].contents[0].replace('−', '-'))
+            oddsList[int((i)/2)][2] = float(outcome_sections[j].contents[0].contents[0].replace('−', '-'))
         else:
-            oddsList[int((i - 1)/2)][3] = float(outcome_sections[j].contents[0].contents[0].replace('−', '-'))
+            oddsList[int((i- 1)/2)][3] = float(outcome_sections[j].contents[0].contents[0].replace('−', '-'))
 
     return oddsList
 
@@ -304,18 +312,26 @@ accuracy, bins = createOdds(teams, ranking, df, numTeams)
 betFinder = True
 ## Find good deals
 
-if betFinder:
+if betFinder and year == "2024":
     oddsList = findGames()
     lengthGames = len(oddsList)
 
     teamBets = []
     expectedValueBets = []
-
+    matchupBets = []
+    bestOdds = []
+    runningTeams = []
     for i in range(lengthGames):
         matchup = oddsList[i][0]+"v"+oddsList[i][1]
 
         team1 = oddsList[i][0]
         team2 = oddsList[i][1]
+
+        if team1 in runningTeams or team2 in runningTeams:
+            continue
+        else:
+            runningTeams.append(team1)
+            runningTeams.append(team2)
 
         rank1 = getRank(team1, teams, ranking, numTeams)
         rank2 = getRank(team2, teams, ranking, numTeams)
@@ -348,31 +364,43 @@ if betFinder:
         if favoriteExpectedValue > underdogExpectedValue:
             maxExpectedValue = favoriteExpectedValue
             bestBet = favorite
+            bestValueOdds = favoriteOdds
         else:
             maxExpectedValue = underdogExpectedValue
             bestBet = underdog
+            bestValueOdds = underdogOdds
 
         teamBets.append(bestBet)
         expectedValueBets.append(maxExpectedValue*100/chosenBet)
+        matchupBets.append(matchup)
+        bestOdds.append(bestValueOdds)
 
-    sortedData = sorted(zip(expectedValueBets, teamBets), reverse=True)
-    expectedValueBets, teamBets = zip(*sortedData)
+    sortedData = sorted(zip(expectedValueBets, teamBets, matchupBets, bestOdds), reverse=True)
+    expectedValueBets, teamBets, matchupBets, bestOdds = zip(*sortedData)
 
     # print("\n\n Best Bets \n\n")
 
     threshold = 10
     safeBets = []
     safeBetTeams = []
-
+    safeBetMatchups =[]
+    safeBetOdds =[]
+    lengthGames = len(matchupBets)
     for i in range(lengthGames):
         if expectedValueBets[i] < threshold:
             continue
         # print(str(i).rjust(2) + " | " + teamBets[i].ljust(21) + " | " + str(round(expectedValueBets[i], 1)).ljust(6, "0"))
         safeBets.append(expectedValueBets[i])
         safeBetTeams.append(teamBets[i])
+        safeBetMatchups.append(matchupBets[i])
+        safeBetOdds.append(bestOdds[i])
 
     safeBets = np.array(safeBets)
+    safeBetOdds = np.array(safeBetOdds)
+    initialBets = safeBets
+
     safeBets = safeBets*chosenBet/sum(safeBets)
+    safeBetOdds = safeBetOdds*(safeBets/initialBets)
 
     print("\n\n Safe Bets \n\n")
     for i in range(lengthGames):
@@ -380,6 +408,37 @@ if betFinder:
             continue
         print(str(i).rjust(2) + " | " + safeBetTeams[i].ljust(21) + " | " + str(round(safeBets[i], 1)).ljust(6, "0"))
 
+## Log bets
+today = str(date.today())
+bookieFile = "Bookie_2024.xlsx"
+dfBookie = pd.read_excel(bookieFile)
+
+dateBookie = dfBookie.Date.tolist()
+gamesBookie = dfBookie.Game.tolist()
+betTeamBookie = dfBookie.Team_Bet.tolist()
+betAmountBookie = dfBookie.Amount_Bet.tolist()
+winningsBookie = dfBookie.Winning_Return.tolist()
+
+
+nLogs = len(dateBookie)
+for k in range(len(safeBets)):
+    loggedgame = False
+    for i in range(len(dateBookie)):
+        if today == dateBookie[i] and gamesBookie[i] == safeBetMatchups[k]:
+            loggedgame = True
+            break
+
+    if loggedgame:
+        continue
+
+    dateBookie.append(today)
+    gamesBookie.append(safeBetMatchups[k])
+    betTeamBookie.append(safeBetTeams[k])
+    betAmountBookie.append(safeBets[k])
+    winningsBookie.append(safeBetOdds[k])
+
+dataBookie = pd.DataFrame({'Date': dateBookie, 'Game': gamesBookie, 'Team_Bet': betTeamBookie, 'Amount_Bet': betAmountBookie, 'Winning_Return': winningsBookie})
+dataBookie.to_excel(bookieFile, index=True)
 
 # comparisons
 matchMake = True
