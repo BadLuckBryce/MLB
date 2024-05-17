@@ -207,7 +207,7 @@ ranking, teams = pageRank(df, damping, postSeason)
 numTeams = len(teams)
 print("\n\n")
 for i in range(numTeams):
-    print(teams[i]+":    "+str(ranking[i]))
+    print(str(i).rjust(2) + " | " + teams[i].ljust(21) + " | " + str(round(ranking[i], 3)).ljust(6, "0"))
 
 
 print("\n\n")
