@@ -1,29 +1,29 @@
-
-#imports
-
+import argparse
+from bs4 import BeautifulSoup
 import numpy as np
+import os
 import pandas as pd
 import requests
-from bs4 import BeautifulSoup
+
 
 def pullIndex(team, teamList, nTeams):
-
     for i in range(nTeams):
         if team.strip() == teamList[i]:
             index = i
             break
     return index
 
+
 def getData(year):
     away_team_list = []
     home_team_list = []
     winning_team_list = []
 
-    url = f"https://www.baseball-reference.com/leagues/MLB/{year}-schedule.shtml"
+    url = f'https://www.baseball-reference.com/leagues/MLB/{year}-schedule.shtml'
     response = requests.get(url)
     soup = BeautifulSoup(response.content, 'html.parser')
 
-    game_sections = soup.find_all('p', {'class': "game"})
+    game_sections = soup.find_all('p', {'class': 'game'})
 
     for section in game_sections:
         section_text = section.text.strip()
@@ -53,11 +53,13 @@ def getData(year):
     data = pd.DataFrame({'Away': away_team_list, 'Home': home_team_list, 'Winning': winning_team_list})
     return data
 
+
 def save_to_excel(data, year):
     if data is not None:
         filename = f'mlb_season_{year}.xlsx'
         data.to_excel(filename, index=True)
-        print(f"Data saved to {filename}")
+        print(f'Data saved to {filename}')
+
 
 def buildNetwork(df, postSeason):
 
@@ -96,34 +98,36 @@ def buildNetwork(df, postSeason):
 
     for i in range(numTeams):
         for j in range(numTeams):
-            networkMatrix[i][j] = networkMatrix[i][j]/sumVector[j]
+            networkMatrix[i][j] = networkMatrix[i][j] / sumVector[j]
 
     return networkMatrix, teams, numTeams
 
-def iterativeMarkov(M,d, alpha ,nTeams):
+
+def iterativeMarkov(M, d, alpha, nTeams):
     e = 0.0001
-    Ri = np.zeros([nTeams, 1])/nTeams
-    R = np.ones([nTeams, 1])/nTeams
-    dR = np.ones([nTeams, 1])*10
+    Ri = np.zeros([nTeams, 1]) / nTeams
+    R = np.ones([nTeams, 1]) / nTeams
+    dR = np.ones([nTeams, 1]) * 10
     while max(dR) > e:
         Ri = R
-        R = d + alpha*np.matmul(M,Ri)
+        R = d + alpha * np.matmul(M, Ri)
         dR = abs(R - Ri)
 
     return e, R
 
+
 def pageRank(M, damping, postSeason):
 
-    M, teams, nTeams = buildNetwork(df,postSeason)
-    dampingvector = np.ones([nTeams, 1]) * (1 - damping)/nTeams
+    M, teams, nTeams = buildNetwork(df, postSeason)
+    dampingvector = np.ones([nTeams, 1]) * (1 - damping) / nTeams
     if damping == 1:
-        eigenvalues,eigenvectors = np.linalg.eig(M)
+        eigenvalues, eigenvectors = np.linalg.eig(M)
     else:
         eigenvalues, eigenvectors = iterativeMarkov(M, dampingvector, damping, nTeams)
 
-    ranking = np.zeros([nTeams,1])
+    ranking = np.zeros([nTeams, 1])
     for i in range(nTeams):
-        ranking[i]= abs(np.real(eigenvectors[i][0]))
+        ranking[i] = abs(np.real(eigenvectors[i][0]))
 
     ranking = ranking * 100 / max(ranking)
     rankingList = []
@@ -135,8 +139,9 @@ def pageRank(M, damping, postSeason):
 
     return sorted_rankings, sorted_teams
 
+
 def completeTeam(team, teamsList):
-    if team == "Diamondbacks":
+    if team == 'Diamondbacks':
         team = "D'Backs"
 
     for current in teamsList:
@@ -145,13 +150,14 @@ def completeTeam(team, teamsList):
             break
     return teamOutput
 
-def getRank(team, teamsList, ranking, nTeams):
 
+def getRank(team, teamsList, ranking, nTeams):
 
     fullTeam = completeTeam(team, teamsList)
     index = pullIndex(fullTeam, teamsList, nTeams)
     rank = ranking[index]
     return rank
+
 
 def createOdds(teams, ranking, df, numTeams):
     awayTeamList = df['Away']
@@ -160,13 +166,13 @@ def createOdds(teams, ranking, df, numTeams):
 
     nEntries = 6
     rankingRange = max(ranking) - min(ranking)
-    binSize = rankingRange/nEntries
+    binSize = rankingRange / nEntries
 
     nGames = len(awayTeamList)
 
-    correctPredictions = np.zeros([nEntries-1, 1])
-    attemptedPredictions = np.zeros([nEntries-1, 1])
-    bins = np.array((range(nEntries)))*binSize
+    correctPredictions = np.zeros([nEntries - 1, 1])
+    attemptedPredictions = np.zeros([nEntries - 1, 1])
+    bins = np.array((range(nEntries))) * binSize
 
     for i in range(nGames):
         rank1 = getRank(awayTeamList[i], teams, ranking, numTeams)
@@ -178,41 +184,40 @@ def createOdds(teams, ranking, df, numTeams):
         pointDifference = np.abs(rank1 - rank2)
         a = predictedWinner
         b = winningTeamList[i]
-        for j in range(nEntries-2, -1, -1):
-            if pointDifference > j*binSize:
-                attemptedPredictions[j] = attemptedPredictions[j]+1
+        for j in range(nEntries - 2, -1, -1):
+            if pointDifference > j * binSize:
+                attemptedPredictions[j] = attemptedPredictions[j] + 1
                 if predictedWinner.strip() == winningTeamList[i].strip():
                     correctPredictions[j] = correctPredictions[j] + 1
                 break
-    accuracy_vector = correctPredictions/attemptedPredictions
-    accuracy = np.array(np.zeros([len(accuracy_vector)+1 , 1]))
+    accuracy_vector = correctPredictions / attemptedPredictions
+    accuracy = np.array(np.zeros([len(accuracy_vector) + 1, 1]))
     accuracy[0] = 0.5
     for i in range(len(accuracy_vector)):
-        accuracy[i+1] = accuracy_vector[i][0]
+        accuracy[i + 1] = accuracy_vector[i][0]
 
     return accuracy, bins
+
 
 def interpolate(x0, xVec, yVec):
 
     power = 2
     M = np.ones([len(xVec), power])
     fx = np.ones([len(xVec), 1])
-    x = np.ones([1, power+1])
+    x = np.ones([1, power + 1])
     a0 = 0.5
 
     for i in range(len(xVec)):
-        for j in range(1, power+1):
-            M[i][j-1] = xVec[i]**j
+        for j in range(1, power + 1):
+            M[i][j - 1] = xVec[i]**j
         fx[i] = yVec[i][0] - a0
 
-    for i in range(power+1):
+    for i in range(power + 1):
         x[0][i] = x0**i
 
     a = np.matmul(np.linalg.pinv(M), fx)
     a = np.insert(a, 0, a0)
     y0 = np.matmul(x, a)[0]
-
-
 
     # if x0 <= xVec[0]:
     #     y0 = yVec[0][0]
@@ -232,13 +237,14 @@ def interpolate(x0, xVec, yVec):
 
     return y0
 
+
 def findGames():
-    url = f"https://sportsbook.draftkings.com/leagues/baseball/mlb"
+    url = f'https://sportsbook.draftkings.com/leagues/baseball/mlb'
     response = requests.get(url)
     soup = BeautifulSoup(response.content, 'html.parser')
 
-    team_sections = soup.find_all('div', {'class': "event-cell__name-text"})
-    outcome_sections = soup.find_all('div', {'class': "sportsbook-outcome-cell__element"})
+    team_sections = soup.find_all('div', {'class': 'event-cell__name-text'})
+    outcome_sections = soup.find_all('div', {'class': 'sportsbook-outcome-cell__element'})
 
     numTeamsPlaying = len(team_sections)
     numOutcomes = len(outcome_sections)
@@ -247,170 +253,174 @@ def findGames():
     if remainders == 0:
         start = 0
     else:
-        start = int(remainders/2 - 1)
-
+        start = int(remainders / 2 - 1)
 
     oddsList = []
-    for i in range(int(numTeamsPlaying/2)):
-        oddsList.append([[],[],[],[]])
+    for i in range(int(numTeamsPlaying / 2)):
+        oddsList.append([[], [], [], []])
 
     for i in range(numTeamsPlaying):
         if i % 2 == 0:
-            oddsList[int(i/2)][0] = team_sections[i].contents[0].split(" ")[1]
+            oddsList[int(i / 2)][0] = team_sections[i].contents[0].split(' ')[1]
         else:
-            oddsList[int((i - 1)/2)][1] = team_sections[i].contents[0].split(" ")[1]
+            oddsList[int((i - 1) / 2)][1] = team_sections[i].contents[0].split(' ')[1]
 
     for i in range(start, numTeamsPlaying):
-        j = 2*int(3*i+2 - remainders)+1
+        j = 2 * int(3 * i + 2 - remainders) + 1
         if i % 2 == 0:
-            oddsList[int(i/2)][2] = float(outcome_sections[j].contents[0].contents[0].replace('−', '-'))
+            oddsList[int(i / 2)][2] = float(outcome_sections[j].contents[0].contents[0].replace('−', '-'))
         else:
-            oddsList[int((i - 1)/2)][3] = float(outcome_sections[j].contents[0].contents[0].replace('−', '-'))
+            oddsList[int((i - 1) / 2)][3] = float(outcome_sections[j].contents[0].contents[0].replace('−', '-'))
 
     return oddsList
 
 
-year = input("Enter the year for MLB season data: ")
-fileName = f'mlb_season_{year}.xlsx'
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser(
+        prog='BadLuckBrce PagePrank for MLB',
+    )
+    parser.add_argument('--year', help='The year for MLB season data', required=True, type=int)
+    parser.add_argument('--match-make', help='Perform matchmaking between two teams', action='store_true')
+    parser.add_argument('--bet-finder', help='Perform bet finding', action='store_true')
+    args = parser.parse_args()
 
-if year == "2024":
-    postSeason = 0
-else:
-    postSeason = 30
+    year = args.year
+    match_make = args.match_make
+    bet_finder = args.bet_finder
 
-try:
-    int(year)
-except ValueError:
-    print("Please enter a valid year.")
+    if year < 1942 or year > 2023:  # TODO: Idk what valid years are
+        print('Please enter a valid year.')
 
-# data = getData(year)
-# save_to_excel(data, year)
-df = pd.read_excel(fileName)
+    if not os.path.isdir('data'):
+        os.mkdir('data')
+    fileName = f'data/mlb_season_{year}.xlsx'
+    try:
+        # Don't repull data if you already have it
+        df = pd.read_excel(fileName)
+    except Exception:
+        data = getData(year)
+        save_to_excel(data, year)
+        df = pd.read_excel(fileName)
 
-damping = 0.85
-ranking, teams = pageRank(df, damping, postSeason)
+    damping = 0.85
+    postSeason = 0 if year == '2024' else 30
+    ranking, teams = pageRank(df, damping, postSeason)
 
-numTeams = len(teams)
-print("\n\n")
-for i in range(numTeams):
-    print(str(i).rjust(2) + " | " + teams[i].ljust(21) + " | " + str(round(ranking[i], 3)).ljust(6, "0"))
+    numTeams = len(teams)
+    print('\n\n')
+    for i in range(numTeams):
+        print(str(i).rjust(2) + ' | ' + teams[i].ljust(21) + ' | ' + str(round(ranking[i], 3)).ljust(6, '0'))
 
+    print('\n\n')
+    accuracy, bins = createOdds(teams, ranking, df, numTeams)
+    # print(accuracy)
 
-print("\n\n")
-accuracy, bins = createOdds(teams, ranking, df, numTeams)
-# print(accuracy)
+    # Find good deals
+    if bet_finder:
+        oddsList = findGames()
+        lengthGames = len(oddsList)
 
+        teamBets = []
+        expectedValueBets = []
 
-betFinder = True
-## Find good deals
+        for i in range(lengthGames):
+            matchup = oddsList[i][0] + 'v' + oddsList[i][1]
 
-if betFinder:
-    oddsList = findGames()
-    lengthGames = len(oddsList)
+            team1 = oddsList[i][0]
+            team2 = oddsList[i][1]
 
-    teamBets = []
-    expectedValueBets = []
+            rank1 = getRank(team1, teams, ranking, numTeams)
+            rank2 = getRank(team2, teams, ranking, numTeams)
 
-    for i in range(lengthGames):
-        matchup = oddsList[i][0]+"v"+oddsList[i][1]
+            pointsDifference = np.abs(rank1 - rank2)
+            confidence = interpolate(pointsDifference, bins, accuracy)
 
-        team1 = oddsList[i][0]
-        team2 = oddsList[i][1]
+            bettingOdds = (round(100 * (confidence) / (100 - (confidence))))
 
-        rank1 = getRank(team1, teams, ranking, numTeams)
-        rank2 = getRank(team2, teams, ranking, numTeams)
+            if rank1 > rank2:
+                favorite = team1
+                underdog = team2
+                favoriteOdds = oddsList[i][2]
+                underdogOdds = oddsList[i][3]
+            else:
+                favorite = team2
+                underdog = team1
+                favoriteOdds = oddsList[i][3]
+                underdogOdds = oddsList[i][2]
 
-        pointsDifference = np.abs(rank1 - rank2)
-        confidence = interpolate(pointsDifference, bins, accuracy)
+            chosenBet = 100
+            if favoriteOdds < 0:
+                favoriteOdds = -100 * chosenBet / favoriteOdds
+            if underdogOdds < 0:
+                underdogOdds = -100 * chosenBet / underdogOdds
 
-        bettingOdds = (round(100*(confidence)/(100-(confidence))))
+            favoriteExpectedValue = confidence * favoriteOdds - chosenBet * (1 - confidence)
+            underdogExpectedValue = (1 - confidence) * underdogOdds - chosenBet * (confidence)
 
-        if rank1 > rank2:
-            favorite = team1
-            underdog = team2
-            favoriteOdds = oddsList[i][2]
-            underdogOdds = oddsList[i][3]
+            if favoriteExpectedValue > underdogExpectedValue:
+                maxExpectedValue = favoriteExpectedValue
+                bestBet = favorite
+            else:
+                maxExpectedValue = underdogExpectedValue
+                bestBet = underdog
+
+            teamBets.append(bestBet)
+            expectedValueBets.append(maxExpectedValue * 100 / chosenBet)
+
+        sortedData = sorted(zip(expectedValueBets, teamBets), reverse=True)
+        expectedValueBets, teamBets = zip(*sortedData)
+
+        # print('\n\n Best Bets \n\n')
+
+        threshold = 10
+        safeBets = []
+        safeBetTeams = []
+
+        for i in range(lengthGames):
+            if expectedValueBets[i] < threshold:
+                continue
+            # print(str(i).rjust(2) + ' | ' + teamBets[i].ljust(21) + ' | ' + str(round(expectedValueBets[i], 1)).ljust(6, '0'))
+            safeBets.append(expectedValueBets[i])
+            safeBetTeams.append(teamBets[i])
+
+        safeBets = np.array(safeBets)
+        safeBets = safeBets * chosenBet / sum(safeBets)
+
+        print('\n\n Safe Bets \n\n')
+        for i in range(lengthGames):
+            if expectedValueBets[i] < threshold:
+                continue
+            print(str(i).rjust(2) + ' | ' + safeBetTeams[i].ljust(21) + ' | ' + str(round(safeBets[i], 1)).ljust(6, '0'))
+
+    # comparisons
+    while match_make:
+        matchup = input('Enter Match Up [a v b]: ')
+        if matchup == 'kill':
+            break
         else:
-            favorite = team2
-            underdog = team1
-            favoriteOdds = oddsList[i][3]
-            underdogOdds = oddsList[i][2]
+            team1 = matchup.split(' v ')[0]
+            team2 = matchup.split(' v ')[1]
 
-        chosenBet = 100
-        if favoriteOdds < 0:
-            favoriteOdds = -100*chosenBet/favoriteOdds
-        if underdogOdds < 0:
-            underdogOdds = -100*chosenBet/underdogOdds
+            rank1 = getRank(team1, teams, ranking, numTeams)
+            rank2 = getRank(team2, teams, ranking, numTeams)
 
-        favoriteExpectedValue = confidence*favoriteOdds - chosenBet*(1-confidence)
-        underdogExpectedValue = (1-confidence)*underdogOdds - chosenBet*(confidence)
+            pointsDifference = np.abs(rank1 - rank2)
+            confidence = interpolate(pointsDifference, bins, accuracy) * 100
 
-        if favoriteExpectedValue > underdogExpectedValue:
-            maxExpectedValue = favoriteExpectedValue
-            bestBet = favorite
-        else:
-            maxExpectedValue = underdogExpectedValue
-            bestBet = underdog
+            bettingOdds = str(round(100 * (confidence) / (100 - (confidence))))
 
-        teamBets.append(bestBet)
-        expectedValueBets.append(maxExpectedValue*100/chosenBet)
+            payoutFavorite = '-' + bettingOdds
+            payoutUnderdog = '+' + bettingOdds
 
-    sortedData = sorted(zip(expectedValueBets, teamBets), reverse=True)
-    expectedValueBets, teamBets = zip(*sortedData)
+            if rank1 > rank2:
+                favorite = team1
+                underdog = team2
+            else:
+                favorite = team2
+                underdog = team1
 
-    # print("\n\n Best Bets \n\n")
-
-    threshold = 10
-    safeBets = []
-    safeBetTeams = []
-
-    for i in range(lengthGames):
-        if expectedValueBets[i] < threshold:
-            continue
-        # print(str(i).rjust(2) + " | " + teamBets[i].ljust(21) + " | " + str(round(expectedValueBets[i], 1)).ljust(6, "0"))
-        safeBets.append(expectedValueBets[i])
-        safeBetTeams.append(teamBets[i])
-
-    safeBets = np.array(safeBets)
-    safeBets = safeBets*chosenBet/sum(safeBets)
-
-    print("\n\n Safe Bets \n\n")
-    for i in range(lengthGames):
-        if expectedValueBets[i] < threshold:
-            continue
-        print(str(i).rjust(2) + " | " + safeBetTeams[i].ljust(21) + " | " + str(round(safeBets[i], 1)).ljust(6, "0"))
-
-
-# comparisons
-matchMake = True
-while matchMake:
-    matchup = input("Enter Match Up [a v b]: ")
-    if matchup == "kill":
-        break
-    else:
-        team1 = matchup.split(" v ")[0]
-        team2 = matchup.split(" v ")[1]
-
-        rank1 = getRank(team1, teams, ranking, numTeams)
-        rank2 = getRank(team2, teams, ranking, numTeams)
-
-        pointsDifference = np.abs(rank1 - rank2)
-        confidence = interpolate(pointsDifference, bins, accuracy)*100
-
-        bettingOdds = str(round(100*(confidence)/(100-(confidence))))
-
-        payoutFavorite = "-"+bettingOdds
-        payoutUnderdog = "+"+bettingOdds
-
-        if rank1 > rank2:
-            favorite = team1
-            underdog = team2
-        else:
-            favorite = team2
-            underdog = team1
-
-        print("\n")
-        print("FAVORITE: " + favorite + "   |   " + payoutFavorite + " | Confidence: " + str(round(confidence,2)))
-        print("UNDERDOG: " + underdog + "   |   " + payoutUnderdog)
-        print("\n")
+            print('\n')
+            print('FAVORITE: ' + favorite + '   |   ' + payoutFavorite + ' | Confidence: ' + str(round(confidence, 2)))
+            print('UNDERDOG: ' + underdog + '   |   ' + payoutUnderdog)
+            print('\n')
 
